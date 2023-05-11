@@ -1,0 +1,3 @@
+/home/vboxuser/CLionProjects/OperatingSystemsEX3/cmake-build-debug/CMakeFiles/OperatingSystemsEX3.dir
+/home/vboxuser/CLionProjects/OperatingSystemsEX3/cmake-build-debug/CMakeFiles/edit_cache.dir
+/home/vboxuser/CLionProjects/OperatingSystemsEX3/cmake-build-debug/CMakeFiles/rebuild_cache.dir
