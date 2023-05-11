@@ -60,54 +60,59 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-void server_mode(int port, int progress, int quiet) {
+void server_mode(int port, int progress, int quiet)
+{
+    char buffer[BUFFER_SIZE];
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) 
+    {
+        perror("socket");
+        exit(EXIT_FAILURE);
+    }
+
+    struct sockaddr_in servaddr;
+    memset(&servaddr, 0, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    servaddr.sin_port = htons(port);
+
+    if (bind(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0) 
+    {
+        perror("bind");
+        exit(EXIT_FAILURE);
+    }
+
+    if (listen(sockfd, MAX_CONN) < 0) {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Server listening on port %d...\n", port);
+
+    struct sockaddr_in cliaddr;
+    socklen_t clilen = sizeof(cliaddr);
+    int connfd = accept(sockfd, (struct sockaddr *) &cliaddr, &clilen);
+    if (connfd < 0) {
+        perror("accept");
+        exit(EXIT_FAILURE);
+    }
+
+    printf("Connected to client: %s:%d\n", inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
     if(progress)
     {
         if(quiet)
         {
             printf("im here\n");
+            ssize_t n = recv(sockfd, buffer, BUFFER_SIZE, 0);
+            printf("\nsize recieved: %ld\n", n);
         }
     }
     else
     {
-        int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-        if (sockfd < 0) {
-        perror("socket");
-        exit(EXIT_FAILURE);
-        }
-
-        struct sockaddr_in servaddr;
-        memset(&servaddr, 0, sizeof(servaddr));
-        servaddr.sin_family = AF_INET;
-        servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-        servaddr.sin_port = htons(port);
-
-        if (bind(sockfd, (struct sockaddr *) &servaddr, sizeof(servaddr)) < 0) {
-            perror("bind");
-            exit(EXIT_FAILURE);
-        }
-
-        if (listen(sockfd, MAX_CONN) < 0) {
-            perror("listen");
-            exit(EXIT_FAILURE);
-        }
-
-        printf("Server listening on port %d...\n", port);
-
-        struct sockaddr_in cliaddr;
-        socklen_t clilen = sizeof(cliaddr);
-        int connfd = accept(sockfd, (struct sockaddr *) &cliaddr, &clilen);
-        if (connfd < 0) {
-            perror("accept");
-            exit(EXIT_FAILURE);
-        }
-
-        printf("Connected to client: %s:%d\n", inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
         handle_connection(connfd);
-
+    }
         close(connfd);
         close(sockfd);
-    }
     
 }
 
@@ -135,18 +140,16 @@ void client_mode(const char *ip, int port, char* type, char* param) {
         perror("connect");
         exit(EXIT_FAILURE);
     }
-    printf("\n%s\n", type);
-    printf("\n%s\n", param);
     printf("Connected to server: %s:%d\n", ip, port);
-    printf("type = %s", type);
-    printf("\nparam = %s", param);
     if (type)
     {
         if (strcmp(type, "ipv4") == 0)
         {
             if (strcmp(param, "tcp") == 0)
             {
-                send(sockfd, "ipv4 tcp", 8, 0);
+                sleep(1);
+                int a = send(sockfd, "ipv4 tcp", 8, 0);
+                printf("\nsend size is: %d\n", a);
                 printf("\nsend ipv4 tcp");
             }
             else if (strcmp(param, "udp") == 0)
