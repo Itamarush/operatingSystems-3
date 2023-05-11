@@ -138,69 +138,70 @@ void client_mode(const char *ip, int port, char* type, char* param) {
     printf("\n%s\n", type);
     printf("\n%s\n", param);
     printf("Connected to server: %s:%d\n", ip, port);
+    printf("type = %s", type);
+    printf("\nparam = %s", param);
     if (type)
     {
-        printf("\na");
-        if (type == "ipv4")
+        if (strcmp(type, "ipv4") == 0)
         {
-            printf("\nb");
-            if (param == "tcp")
+            if (strcmp(param, "tcp") == 0)
             {
-                printf("\nc");
                 send(sockfd, "ipv4 tcp", 8, 0);
                 printf("\nsend ipv4 tcp");
             }
-            else if (param == "udp")
+            else if (strcmp(param, "udp") == 0)
             {
-                /* code */
+                send(sockfd, "ipv4 udp", 8, 0);
+                printf("\nsend ipv4 udp");
             }
             
         }
         else if (type == "ipv6")
         {
-            if (param == "tcp")
+            if (strcmp(param, "tcp") == 0)
             {
-                /* code */
+                send(sockfd, "ipv6 tcp", 8, 0);
+                printf("\nsend ipv6 tcp");
             }
-            else if (param == "udp")
+            else if (strcmp(param, "udp") == 0)
             {
-                /* code */
+                send(sockfd, "ipv6 udp", 8, 0);
+                printf("\nsend ipv6 udp");
             }
         }
         else if (type == "pipe")
         {
-            if (param == "")
+            if (strcmp(param, "filename") == 0)
             {
-                /* code */
-            }
-            else if (param == "filename")
-            {
-                /* code */
+                send(sockfd, "pipe filename", 8, 0);
+                printf("\nsend pipe filename");
             }
         }
         else if (type == "mmap")
         {
-            if (param == "filename")
+            if (strcmp(param, "filename") == 0)
             {
-                /* code */
+                send(sockfd, "mmap pipename", 8, 0);
+                printf("\nsend mmap pipename");
             }
         }
         else if (type == "uds")
         {
-            if (param == "dgram")
+            if (strcmp(param, "dgram") == 0)
             {
-                /* code */
+                send(sockfd, "uds dgram", 8, 0);
+                printf("\nsend uds dgram");
             }
-            else if (param == "stream")
+            else if (strcmp(param, "stream") == 0)
             {
-                /* code */
+                send(sockfd, "uds stream", 8, 0);
+                printf("\nsend uds stream");
             }
         }        
         
     }
     else
     {
-        printf("\nkk");
         handle_connection(sockfd);
     }
         close(sockfd);
