@@ -18,6 +18,10 @@ void client_mode(const char *ip, int port, char* type, char* param);
 
 void client_ipv6_tcp(const char *ip, int port, const char *filename);
 
+void client_ipv6_udp(const char *ip, int port, const char *filename);
+
+void server_ipv6_udp(int port, const char *filename);
+
 void server_ipv6_tcp(int port, const char *filename);
 
 void handle_connection(int sockfd);
@@ -104,7 +108,12 @@ void server_mode(int port, int progress, int quiet)
             if (n > 0) {
                 buffer[n] = '\0';
                 printf("\nReceived: %s\n", buffer);
-                server_ipv6_tcp(port+1, "100MB");
+                if (strcmp("ipv6 udp", buffer))
+                {
+                    printf("1111111");
+                }
+                
+                server_ipv6_udp(port+1, "100MB");
             }
         }
     }
@@ -177,6 +186,8 @@ void client_mode(const char *ip, int port, char* type, char* param) {
                 int a = send(sockfd, "ipv6 udp", 9, 0);
                 send(sockfd, "ipv6 udp", 8, 0);
                 printf("\nsend ipv6 udp");
+                client_ipv6_udp("::1", port+1, "100MB");
+
             }
         }
         else if (strcmp(type, "pipe") == 0)
