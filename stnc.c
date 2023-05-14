@@ -14,6 +14,11 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <semaphore.h>
 
 
 #define BUFFER_SIZE 1024
@@ -94,6 +99,7 @@ int main(int argc, char *argv[]) {
 
     return 0;
 }
+
 
     unsigned short calculateChecksum(const char *data, int length) {
         unsigned int sum = 0;
@@ -194,13 +200,14 @@ int main(int argc, char *argv[]) {
 
     if (progress) {
         if (quiet) {
+            // printf("now1: %s", buffer);
             ssize_t n = recv(connfd, buffer, BUFFER_SIZE, 0);
             if (n > 0) {
                 buffer[n] = '\0';
-
+                // printf("now: %s", buffer);
                 struct timeval start, end; // Variables for time measurement
                 gettimeofday(&start, NULL); // Start time measurement
-
+                
                 int checkSumRecieved = 0;
                 if (strcmp("ipv6 tcp", buffer) == 0) {
                     server_ipv6_tcp(port + 1, "100MB");
@@ -224,15 +231,16 @@ int main(int argc, char *argv[]) {
                     checkSumRecieved = calculateChecksumFile("newUdsDgram.txt");
                     checkSumRecieved = htons(checkSumRecieved);
                 } else if (strcmp("uds stream", buffer) == 0) {
-                    server_uds_stream("socket.sock", "100MB");
+                    server_uds_stream("socket.sock", "newUdsStream.txt");
                     checkSumRecieved = calculateChecksumFile("newUdsStream.txt");
                     checkSumRecieved = htons(checkSumRecieved);
                 } else if (strcmp("pipe filename", buffer) == 0) {
-                    server_pipe_filename("100MB");
-                    checkSumRecieved = calculateChecksumFile("newPipeFilename.txt");
+                    server_pipe_filename("newPipeFilename.txt");
+                    const char* serverOutputFile = "newPipeFilename.txt";
+                    checkSumRecieved = calculateChecksumFile(serverOutputFile);
                     checkSumRecieved = htons(checkSumRecieved);
-                } else if (strcmp("mmap filename", buffer) == 0) {
-                    server_mmap_filename("100MB");
+                } else if (strcmp("mmap stream", buffer) == 0) {
+                    server_mmap_filename("newMmapFilename.txt");
                     checkSumRecieved = calculateChecksumFile("newMmapFilename.txt");
                     checkSumRecieved = htons(checkSumRecieved);
                 }
@@ -242,6 +250,7 @@ int main(int argc, char *argv[]) {
                 ssize_t checksumBytesReceived = recv(connfd, &checksumOfSent, sizeof(checksumOfSent), 0);
                 if (checksumBytesReceived > 0) {
                     checksumOfSent = ntohs(checksumOfSent);
+                    // printf("\n1: %d 2:%d", checkSumRecieved,checksumOfSent);
 
                     if (checkSumRecieved == checksumOfSent) {
                         printf("Checksums match. File transfer successful.\n");
@@ -297,9 +306,11 @@ int main(int argc, char *argv[]) {
             if (strcmp(type, "ipv4") == 0) {
                 if (strcmp(param, "tcp") == 0) {
                     sleep(1);
+                    send(sockfd, "ipv4 tcp", 9, 0);
                     printf("\nSending: ipv4 tcp\n");
                     client_ipv4_tcp("127.0.0.1", port + 1, "100MB");
                 } else if (strcmp(param, "udp") == 0) {
+                    sleep(1);
                     send(sockfd, "ipv4 udp", 9, 0);
                     printf("\nSending: ipv4 udp\n");
                     client_ipv4_udp("127.0.0.1", port + 1, "100MB");
@@ -326,10 +337,13 @@ int main(int argc, char *argv[]) {
                 }
             } else if (strcmp(type, "pipe") == 0) {
                 if (strcmp(param, "filename") == 0) {
-                    client_pipe_filename("100MB.txt");
+                    send(sockfd, "pipe filename", 14, 0);
+                    const char* filename = "100MB.txt";
+                    client_pipe_filename(filename);
                 }
             } else if (strcmp(type, "mmap") == 0) {
                 if (strcmp(param, "filename") == 0) {
+                    send(sockfd, "mmap stream", 14, 0);
                     client_mmap_filename("100MB.txt");
                 }
             }
@@ -654,7 +668,7 @@ void server_ipv6_tcp(int port, const char *filename) {
             perror("socket");
             exit(EXIT_FAILURE);
         }
-        printf("the port is: %d\n", port);
+
         fflush(stdout);
         struct sockaddr_in serv_addr;
         memset(&serv_addr, 0, sizeof(serv_addr));
@@ -846,6 +860,7 @@ void server_ipv6_tcp(int port, const char *filename) {
     }
 
     void client_uds_stream(const char* path, const char* filename) {
+        sleep(1);
         int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
         if (sockfd < 0) {
             perror("socket");
@@ -945,87 +960,85 @@ void server_ipv6_tcp(int port, const char *filename) {
             perror("socket");
             exit(EXIT_FAILURE);
         }
-        printf("here!1");
-        fflush(stdout);
+
         struct sockaddr_un serv_addr;
         memset(&serv_addr, 0, sizeof(serv_addr));
         serv_addr.sun_family = AF_UNIX;
         strncpy(serv_addr.sun_path, path, sizeof(serv_addr.sun_path) - 1);
-        printf("here!2");
-        fflush(stdout);
+
         FILE* file = fopen(filename, "rb");
         if (file == NULL) {
             perror("fopen");
             exit(EXIT_FAILURE);
         }
-        printf("here!3");
-        fflush(stdout);
+
         char buffer[BUFFER_SIZE];
         ssize_t n;
         while ((n = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
             sendto(sockfd, buffer, n, 0, (const struct sockaddr*)&serv_addr, sizeof(serv_addr));
         }
-        printf("here!4");
-        fflush(stdout);
+
         fclose(file);
         close(sockfd);
     }
 
-    void server_pipe_filename(const char* filename) {
-        FILE* file = fopen(filename, "wb");
-        if (file == NULL) {
+
+void server_pipe_filename(const char* filename) {
+    FILE* file = fopen("newPipeFilename.txt", "ab");
+    if (file == NULL) {
+        perror("fopen");
+        exit(EXIT_FAILURE);
+    }
+
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        perror("pipe");
+        exit(EXIT_FAILURE);
+    }
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        perror("fork");
+        exit(EXIT_FAILURE);
+    } else if (pid == 0) {
+        // Child process
+        close(pipefd[1]);  // Close the write end of the pipe
+
+        ssize_t n;
+        char buffer[BUFFER_SIZE];
+        while ((n = read(pipefd[0], buffer, BUFFER_SIZE)) > 0) {
+            fwrite(buffer, 1, n, file);
+        }
+
+        fclose(file);
+        close(pipefd[0]);  // Close the read end of the pipe
+        exit(EXIT_SUCCESS);
+    } else {
+        // Parent process
+        close(pipefd[0]);  // Close the read end of the pipe
+
+        FILE* source = fopen(filename, "rb");
+        if (source == NULL) {
             perror("fopen");
             exit(EXIT_FAILURE);
         }
 
-        int pipefd[2];
-        if (pipe(pipefd) == -1) {
-            perror("pipe");
-            exit(EXIT_FAILURE);
+        ssize_t n;
+        char buffer[BUFFER_SIZE];
+        while ((n = fread(buffer, 1, BUFFER_SIZE, source)) > 0) {
+            write(pipefd[1], buffer, n);
         }
 
-        pid_t pid = fork();
-        if (pid == -1) {
-            perror("fork");
-            exit(EXIT_FAILURE);
-        } else if (pid == 0) {
-            // Child process
-            close(pipefd[1]);  // Close the write end of the pipe
-
-            ssize_t n;
-            char buffer[BUFFER_SIZE];
-            while ((n = read(pipefd[0], buffer, BUFFER_SIZE)) > 0) {
-                fwrite(buffer, 1, n, file);
-            }
-
-            fclose(file);
-            close(pipefd[0]);  // Close the read end of the pipe
-            exit(EXIT_SUCCESS);
-        } else {
-            // Parent process
-            close(pipefd[0]);  // Close the read end of the pipe
-
-            FILE* source = fopen(filename, "rb");
-            if (source == NULL) {
-                perror("fopen");
-                exit(EXIT_FAILURE);
-            }
-
-            ssize_t n;
-            char buffer[BUFFER_SIZE];
-            while ((n = fread(buffer, 1, BUFFER_SIZE, source)) > 0) {
-                write(pipefd[1], buffer, n);
-            }
-
-            fclose(source);
-            close(pipefd[1]);  // Close the write end of the pipe
-            wait(NULL);  // Wait for the child process to exit
-        }
+        fclose(source);
+        close(pipefd[1]);  // Close the write end of the pipe
+        wait(NULL);  // Wait for the child process to exit
     }
+}
 
-    void client_pipe_filename(const char* filename) {
-        int pipefd[2];
-        if (pipe(pipefd) == -1) {
+void client_pipe_filename(const char* filename) {
+    sleep(1);
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
         perror("pipe");
         exit(EXIT_FAILURE);
     }
@@ -1040,42 +1053,40 @@ void server_ipv6_tcp(int port, const char *filename) {
 
         FILE* file = fopen(filename, "rb");
         if (file == NULL) {
-        perror("fopen");
-        exit(EXIT_FAILURE);
+            perror("fopen");
+            exit(EXIT_FAILURE);
         }
 
         char buffer[BUFFER_SIZE];
         ssize_t n;
         while ((n = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
-        write(pipefd[1], buffer, n);
+            write(pipefd[1], buffer, n);
         }
 
         fclose(file);
         close(pipefd[1]);  // Close the write end of the pipe
         exit(EXIT_SUCCESS);
-    } 
-    else {
+    } else {
         // Parent process
         close(pipefd[1]);  // Close the write end of the pipe
 
-        FILE* file = fopen(filename, "wb");
+        FILE* file = fopen("newPipeFilename.txt", "wb");
         if (file == NULL) {
-        perror("fopen");
-        exit(EXIT_FAILURE);
+            perror("fopen");
+            exit(EXIT_FAILURE);
         }
 
         ssize_t n;
         char buffer[BUFFER_SIZE];
         while ((n = read(pipefd[0], buffer, BUFFER_SIZE)) > 0) {
-        fwrite(buffer, 1, n, file);
+            fwrite(buffer, 1, n, file);
         }
 
         fclose(file);
         close(pipefd[0]);  // Close the read end of the pipe
         wait(NULL);  // Wait for the child process to exit
     }
-
-    }
+}
 
     void server_mmap_filename(const char* filename) {
     FILE* file = fopen(filename, "wb");
