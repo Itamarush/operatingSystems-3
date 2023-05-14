@@ -157,101 +157,117 @@ int main(int argc, char *argv[]) {
     }
 
     void server_mode(int port, int progress, int quiet) {
-        char buffer[BUFFER_SIZE];
-        int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-        if (sockfd < 0) {
-            perror("socket");
-            exit(EXIT_FAILURE);
-        }
+    char buffer[BUFFER_SIZE];
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        perror("socket");
+        exit(EXIT_FAILURE);
+    }
 
-        struct sockaddr_in servaddr;
-        memset(&servaddr, 0, sizeof(servaddr));
-        servaddr.sin_family = AF_INET;
-        servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-        servaddr.sin_port = htons(port);
+    struct sockaddr_in servaddr;
+    memset(&servaddr, 0, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    servaddr.sin_port = htons(port);
 
-        if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
-            perror("bind");
-            exit(EXIT_FAILURE);
-        }
+    if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+        perror("bind");
+        exit(EXIT_FAILURE);
+    }
 
-        if (listen(sockfd, MAX_CONN) < 0) {
-            perror("listen");
-            exit(EXIT_FAILURE);
-        }
+    if (listen(sockfd, MAX_CONN) < 0) {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
 
-        printf("Server listening on port %d...\n", port);
+    printf("Server listening on port %d...\n", port);
 
-        struct sockaddr_in cliaddr;
-        socklen_t clilen = sizeof(cliaddr);
-        int connfd = accept(sockfd, (struct sockaddr *)&cliaddr, &clilen);
-        if (connfd < 0) {
-            perror("accept");
-            exit(EXIT_FAILURE);
-        }
+    struct sockaddr_in cliaddr;
+    socklen_t clilen = sizeof(cliaddr);
+    int connfd = accept(sockfd, (struct sockaddr *)&cliaddr, &clilen);
+    if (connfd < 0) {
+        perror("accept");
+        exit(EXIT_FAILURE);
+    }
 
-        printf("Connected to client: %s:%d\n", inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
+    printf("Connected to client: %s:%d\n", inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
 
-        if (progress) {
-            if (quiet) {
-                ssize_t n = recv(connfd, buffer, BUFFER_SIZE, 0);
-                if (n > 0) {
-                    buffer[n] = '\0';
+    if (progress) {
+        if (quiet) {
+            ssize_t n = recv(connfd, buffer, BUFFER_SIZE, 0);
+            if (n > 0) {
+                buffer[n] = '\0';
 
-                    struct timeval start, end; // Variables for time measurement
-                    gettimeofday(&start, NULL); // Start time measurement
+                struct timeval start, end; // Variables for time measurement
+                gettimeofday(&start, NULL); // Start time measurement
 
-                    // Calculate and print the checksum
-                    unsigned short checksum = calculateChecksum(buffer, n);
-                    printf("Checksum: %u\n", checksum);
-                    printf("and the is: %d\n", strcmp("ipv4 tcp", buffer));
-                    
-                    if (strcmp("ipv6 tcp", buffer) == 0) {
-                        server_ipv6_tcp(port + 1, "100MB");
+                int checkSumRecieved = 0;
+                if (strcmp("ipv6 tcp", buffer) == 0) {
+                    server_ipv6_tcp(port + 1, "100MB");
+                    checkSumRecieved = calculateChecksumFile("newIpv6Tcp.txt");
+                    checkSumRecieved = htons(checkSumRecieved);
+
+                } else if (strcmp("ipv6 udp", buffer) == 0) {
+                    server_ipv6_udp(port + 1, "100MB");
+                    checkSumRecieved = calculateChecksumFile("newIpv6Udp.txt");
+                    checkSumRecieved = htons(checkSumRecieved);
+                } else if (strcmp("ipv4 tcp", buffer) == 0) {
+                    server_ipv4_tcp(port + 1, "100MB");
+                    checkSumRecieved = calculateChecksumFile("newIpv4Tcp.txt");
+                    checkSumRecieved = htons(checkSumRecieved);
+                } else if (strcmp("ipv4 udp", buffer) == 0) {
+                    server_ipv4_udp(port + 1, "100MB");
+                    checkSumRecieved = calculateChecksumFile("newIpv4Udp.txt");
+                    checkSumRecieved = htons(checkSumRecieved);
+                } else if (strcmp("uds dgram", buffer) == 0) {
+                    server_uds_dgram("socket.sock", "100MB");
+                    checkSumRecieved = calculateChecksumFile("newUdsDgram.txt");
+                    checkSumRecieved = htons(checkSumRecieved);
+                } else if (strcmp("uds stream", buffer) == 0) {
+                    server_uds_stream("socket.sock", "100MB");
+                    checkSumRecieved = calculateChecksumFile("newUdsStream.txt");
+                    checkSumRecieved = htons(checkSumRecieved);
+                } else if (strcmp("pipe filename", buffer) == 0) {
+                    server_pipe_filename("100MB");
+                    checkSumRecieved = calculateChecksumFile("newPipeFilename.txt");
+                    checkSumRecieved = htons(checkSumRecieved);
+                } else if (strcmp("mmap filename", buffer) == 0) {
+                    server_mmap_filename("100MB");
+                    checkSumRecieved = calculateChecksumFile("newMmapFilename.txt");
+                    checkSumRecieved = htons(checkSumRecieved);
+                }
+
+                // Compare the received checksum with the calculated checksum of the file
+                int  checksumOfSent;
+                ssize_t checksumBytesReceived = recv(connfd, &checksumOfSent, sizeof(checksumOfSent), 0);
+                if (checksumBytesReceived > 0) {
+                    checksumOfSent = ntohs(checksumOfSent);
+
+                    if (checkSumRecieved == checksumOfSent) {
+                        printf("Checksums match. File transfer successful.\n");
+                    } else {
+                        printf("Checksums do not match. File transfer failed.\n");
                     }
+                }
 
-                    if (strcmp("ipv6 udp", buffer) == 0) {
-                        server_ipv6_udp(port + 1, "100MB");
-                    }
-
-                    else if (strcmp("ipv4 tcp", buffer) == 0) {
-                        server_ipv4_tcp(port + 1, "100MB");
-                    }
-
-                    else if (strcmp("ipv4 udp", buffer) == 0) {
-                        server_ipv4_udp(port + 1, "100MB");
-                    }
-
-                    else if (strcmp("uds dgram", buffer) == 0) {
-                        server_uds_dgram("socket.sock", "100MB");
-                    }
-                    
-                    else if (strcmp("uds stream", buffer) == 0) {
-                        server_uds_stream("socket.sock", "100MB");
-                    }
-                    
-                    else if (strcmp("pipe filename", buffer) == 0) {
-                        server_pipe_filename("100MB");
-                    }
-                    
-                    else if (strcmp("mmap filename", buffer) == 0) {
-                        server_mmap_filename("100MB");
-                    }
+                else {
+                    printf("Failed to receive checksum from the client.\n");
+                }
 
                     gettimeofday(&end, NULL); // End time measurement
                     double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000000.0;
                     printf("Time taken: %.2f seconds.\n", elapsed);
                 }
             }
-        else
-        {
+        } else {
             handle_connection(connfd);
         }
 
         close(connfd);
         close(sockfd);
-        }
     }
+
+
     void client_mode(const char *ip, int port, char *type, char *param) {
         int sockfd = socket(AF_INET, SOCK_STREAM, 0);
         if (sockfd < 0) {
@@ -281,51 +297,64 @@ int main(int argc, char *argv[]) {
             if (strcmp(type, "ipv4") == 0) {
                 if (strcmp(param, "tcp") == 0) {
                     sleep(1);
-                    int a = send(sockfd, "ipv4 tcp", 9, 0);
                     printf("\nSending: ipv4 tcp\n");
                     client_ipv4_tcp("127.0.0.1", port + 1, "100MB");
                 } else if (strcmp(param, "udp") == 0) {
-                    send(sockfd, "ipv4 udp", 8, 0);
+                    send(sockfd, "ipv4 udp", 9, 0);
                     printf("\nSending: ipv4 udp\n");
                     client_ipv4_udp("127.0.0.1", port + 1, "100MB");
                 }
-
             } else if (strcmp(type, "ipv6") == 0) {
                 if (strcmp(param, "tcp") == 0) {
                     sleep(1);
-                    int a = send(sockfd, "ipv6 tcp", 9, 0);
-                    send(sockfd, "ipv6 tcp", 8, 0);
+                    send(sockfd, "ipv6 tcp", 9, 0);
                     printf("\nSending: ipv6 tcp\n");
                     client_ipv6_tcp("::1", port + 1, "100MB");
-
-                } else if (strcmp(param, "udp") == 0)
+                } else if (strcmp(param, "udp") == 0) {
                     sleep(1);
-                    int a = send(sockfd, "ipv6 udp", 9, 0);
-                    send(sockfd, "ipv6 udp", 8, 0);
+                    send(sockfd, "ipv6 udp", 9, 0);
                     printf("\nSending: ipv6 udp\n");
                     client_ipv6_udp("::1", port + 1, "100MB");
-
                 }
             } else if (strcmp(type, "uds") == 0) {
-            if (strcmp(param, "dgram") == 0) {
-                client_uds_dgram("socket.sock", "100MB.txt");
-            } else if (strcmp(param, "stream") == 0) {
-                client_uds_stream("socket.sock", "100MB.txt");
-            }
+                if (strcmp(param, "dgram") == 0) {
+                    send(sockfd, "uds dgram", 10, 0);
+                    client_uds_dgram("socket.sock", "100MB.txt");
+                } else if (strcmp(param, "stream") == 0) {
+                    send(sockfd, "uds stream", 11, 0);
+                    client_uds_stream("socket.sock", "100MB.txt");
+                }
             } else if (strcmp(type, "pipe") == 0) {
-            if (strcmp(param, "filename") == 0) {
-                client_pipe_filename("100MB.txt");
-            }
+                if (strcmp(param, "filename") == 0) {
+                    client_pipe_filename("100MB.txt");
+                }
             } else if (strcmp(type, "mmap") == 0) {
-            if (strcmp(param, "filename") == 0) {
-                client_mmap_filename("100MB.txt");
+                if (strcmp(param, "filename") == 0) {
+                    client_mmap_filename("100MB.txt");
+                }
             }
-            }
-        else {
+        } else {
             handle_connection(sockfd);
         }
+
+        // Calculate and send the checksum of the file
+        unsigned short checksum = calculateChecksumFile("100MB.txt");
+        checksum = htons(checksum);
+        
+        // Send the checksum to the server
+        ssize_t checksumBytesSent = send(sockfd, &checksum, sizeof(checksum), 0);
+        if (checksumBytesSent < 0) {
+            perror("send");
+            exit(EXIT_FAILURE);
+        } else if (checksumBytesSent == 0) {
+            printf("Failed to send checksum to the server.\n");
+        } else {
+            printf("Checksum sent to the server.\n");
+        }
+
         close(sockfd);
     }
+
 
 void handle_connection(int sockfd) {
     char buffer[BUFFER_SIZE];
@@ -394,14 +423,12 @@ void server_ipv6_tcp(int port, const char *filename) {
         perror("bind");
         exit(EXIT_FAILURE);
     }
-    printf("ken3");
-    fflush(stdout);
+   
     if (listen(serv_sock, 10) < 0) {
         perror("listen");
         exit(EXIT_FAILURE);
     }
-    printf("ken4");
-    fflush(stdout);
+   
     struct sockaddr_in6 client_addr;
     socklen_t addr_size = sizeof(client_addr);
     int client_sock = accept(serv_sock, (struct sockaddr *)&client_addr, &addr_size);
@@ -421,7 +448,7 @@ void server_ipv6_tcp(int port, const char *filename) {
     while ((n = recv(client_sock, buffer, BUFFER_SIZE, 0)) > 0) {
         fwrite(buffer, 1, n, file);
     }
-
+    
     fclose(file);
     close(client_sock);
     close(serv_sock);
@@ -852,41 +879,65 @@ void server_ipv6_tcp(int port, const char *filename) {
     }
     
     void server_uds_dgram(const char* path, const char* filename) {
-        int serv_sock = socket(AF_UNIX, SOCK_DGRAM, 0);
-        if (serv_sock < 0) {
-            perror("socket");
-            exit(EXIT_FAILURE);
-        }
+    int serv_sock = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (serv_sock < 0) {
+        perror("socket");
+        exit(EXIT_FAILURE);
+    }
 
-        struct sockaddr_un serv_addr;
-        memset(&serv_addr, 0, sizeof(serv_addr));
-        serv_addr.sun_family = AF_UNIX;
-        strncpy(serv_addr.sun_path, path, sizeof(serv_addr.sun_path) - 1);
+    struct sockaddr_un serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sun_family = AF_UNIX;
+    strncpy(serv_addr.sun_path, path, sizeof(serv_addr.sun_path) - 1);
 
-        unlink(path);  // Remove any existing socket file
-        if (bind(serv_sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+    unlink(path);  // Remove any existing socket file
+    if (bind(serv_sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
         perror("bind");
         exit(EXIT_FAILURE);
-        }
-
-        printf("Server listening on Unix Domain Socket: %s\n", path);
-
-        FILE* file = fopen(filename, "wb");
-        if (file == NULL) {
-            perror("fopen");
-            exit(EXIT_FAILURE);
-        }
-
-        char buffer[BUFFER_SIZE];
-        ssize_t n;
-        while ((n = recvfrom(serv_sock, buffer, BUFFER_SIZE, 0, NULL, NULL)) > 0) {
-            fwrite(buffer, sizeof(char), n, file);
-        }
-
-        fclose(file);
-        close(serv_sock);
-        unlink(path);  // Remove the socket file after use
     }
+
+    printf("Server listening on Unix Domain Socket: %s\n", path);
+
+    FILE* file = fopen("newUdsDgram.txt", "wb");
+    if (file == NULL) {
+        perror("fopen");
+        exit(EXIT_FAILURE);
+    }
+
+    char buffer[BUFFER_SIZE];
+    ssize_t n;
+    fd_set rfds;
+    struct timeval timeout;
+
+    while (1) {
+        FD_ZERO(&rfds);
+        FD_SET(serv_sock, &rfds);
+
+        timeout.tv_sec = 1;
+        timeout.tv_usec = 0;
+
+        int retval = select(serv_sock + 1, &rfds, NULL, NULL, &timeout);
+        if (retval == -1) {
+            perror("select");
+            exit(EXIT_FAILURE);
+        } else if (retval == 0) {
+            // Timeout occurred, handle the timeout
+            printf("Timeout occurred.\n");
+            break; // Exit the loop or perform any other required action
+        } else {
+            // Data is available to receive, perform the receive operation
+            n = recvfrom(serv_sock, buffer, BUFFER_SIZE, 0, NULL, NULL);
+            if (n > 0) {
+                fwrite(buffer, sizeof(char), n, file);
+            }
+        }
+    }
+
+    fclose(file);
+    close(serv_sock);
+    unlink(path);  // Remove the socket file after use
+}
+
 
     void client_uds_dgram(const char* path, const char* filename) {
         int sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
@@ -894,24 +945,28 @@ void server_ipv6_tcp(int port, const char *filename) {
             perror("socket");
             exit(EXIT_FAILURE);
         }
-
+        printf("here!1");
+        fflush(stdout);
         struct sockaddr_un serv_addr;
         memset(&serv_addr, 0, sizeof(serv_addr));
         serv_addr.sun_family = AF_UNIX;
         strncpy(serv_addr.sun_path, path, sizeof(serv_addr.sun_path) - 1);
-
+        printf("here!2");
+        fflush(stdout);
         FILE* file = fopen(filename, "rb");
         if (file == NULL) {
             perror("fopen");
             exit(EXIT_FAILURE);
         }
-
+        printf("here!3");
+        fflush(stdout);
         char buffer[BUFFER_SIZE];
         ssize_t n;
         while ((n = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
             sendto(sockfd, buffer, n, 0, (const struct sockaddr*)&serv_addr, sizeof(serv_addr));
         }
-
+        printf("here!4");
+        fflush(stdout);
         fclose(file);
         close(sockfd);
     }
