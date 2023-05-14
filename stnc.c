@@ -13,6 +13,7 @@
 #include <sys/un.h>
 #include <sys/mman.h>
 #include <sys/wait.h>
+#include <errno.h>
 
 
 #define BUFFER_SIZE 1024
@@ -94,7 +95,6 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-    // Function to calculate checksum
     unsigned short calculateChecksum(const char *data, int length) {
         unsigned int sum = 0;
         unsigned short *ptr = (unsigned short *)data;
@@ -104,20 +104,55 @@ int main(int argc, char *argv[]) {
             sum += *ptr++;
             length -= 2;
         }
-
         // If length is odd, add the last byte
         if (length > 0) {
             sum += *((unsigned char *)ptr);
         }
-
         // Add the carry bits to the sum
         while (sum >> 16) {
             sum = (sum & 0xFFFF) + (sum >> 16);
         }
+        // Take the one's complement of the sum
+        unsigned short checksum = ~sum;
+        return checksum;
+    }
+
+    unsigned short calculateChecksumFile(const char *filename) {
+        FILE *file = fopen(filename, "rb");
+        if (file == NULL) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
+
+        char buffer[BUFFER_SIZE];
+        unsigned int sum = 0;
+        size_t bytesRead;
+
+        while ((bytesRead = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
+            unsigned short *ptr = (unsigned short *)buffer;
+            size_t length = bytesRead;
+
+            // Calculate the sum of 16-bit chunks
+            while (length > 1) {
+                sum += *ptr++;
+                length -= 2;
+            }
+
+            // If length is odd, add the last byte
+            if (length > 0) {
+                sum += *((unsigned char *)ptr);
+            }
+
+            // Add the carry bits to the sum
+            while (sum >> 16) {
+                sum = (sum & 0xFFFF) + (sum >> 16);
+            }
+        }
+
+        fclose(file);
 
         // Take the one's complement of the sum
         unsigned short checksum = ~sum;
-
         return checksum;
     }
 
@@ -162,7 +197,6 @@ int main(int argc, char *argv[]) {
                 ssize_t n = recv(connfd, buffer, BUFFER_SIZE, 0);
                 if (n > 0) {
                     buffer[n] = '\0';
-                    printf("\nReceived: %s\n", buffer);
 
                     struct timeval start, end; // Variables for time measurement
                     gettimeofday(&start, NULL); // Start time measurement
@@ -170,16 +204,20 @@ int main(int argc, char *argv[]) {
                     // Calculate and print the checksum
                     unsigned short checksum = calculateChecksum(buffer, n);
                     printf("Checksum: %u\n", checksum);
-
+                    printf("and the is: %d\n", strcmp("ipv4 tcp", buffer));
+                    
                     if (strcmp("ipv6 tcp", buffer) == 0) {
                         server_ipv6_tcp(port + 1, "100MB");
                     }
-                    else if (strcmp("ipv6 udp", buffer) == 0) {
+
+                    if (strcmp("ipv6 udp", buffer) == 0) {
                         server_ipv6_udp(port + 1, "100MB");
                     }
+
                     else if (strcmp("ipv4 tcp", buffer) == 0) {
                         server_ipv4_tcp(port + 1, "100MB");
                     }
+
                     else if (strcmp("ipv4 udp", buffer) == 0) {
                         server_ipv4_udp(port + 1, "100MB");
                     }
@@ -338,6 +376,7 @@ void handle_connection(int sockfd) {
 //################### ipV6 tcp ######################//
 
 void server_ipv6_tcp(int port, const char *filename) {
+
     int serv_sock = socket(AF_INET6, SOCK_STREAM, 0);
     if (serv_sock < 0) {
         perror("socket");
@@ -355,12 +394,14 @@ void server_ipv6_tcp(int port, const char *filename) {
         perror("bind");
         exit(EXIT_FAILURE);
     }
-
+    printf("ken3");
+    fflush(stdout);
     if (listen(serv_sock, 10) < 0) {
         perror("listen");
         exit(EXIT_FAILURE);
     }
-
+    printf("ken4");
+    fflush(stdout);
     struct sockaddr_in6 client_addr;
     socklen_t addr_size = sizeof(client_addr);
     int client_sock = accept(serv_sock, (struct sockaddr *)&client_addr, &addr_size);
@@ -431,43 +472,65 @@ void server_ipv6_tcp(int port, const char *filename) {
 
     //################### ipV6 udp ######################//
 
-    void server_ipv6_udp(int port, const char *filename) {
-        int serv_sock = socket(AF_INET6, SOCK_DGRAM, 0);
-        if (serv_sock < 0) {
-            perror("socket");
-            exit(EXIT_FAILURE);
-        }
+   void server_ipv6_udp(int port, const char *filename) {
 
-        struct sockaddr_in6 serv_addr;
-        memset(&serv_addr, 0, sizeof(serv_addr));
-        serv_addr.sin6_family = AF_INET6;
-        serv_addr.sin6_addr = in6addr_any;
-        serv_addr.sin6_port = htons(port);
-
-        if (bind(serv_sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
-            perror("bind");
-            exit(EXIT_FAILURE);
-        }
-
-        FILE *file = fopen("newIpv6Udp.txt", "wb");
-        if (file == NULL) {
-            perror("fopen");
-            exit(EXIT_FAILURE);
-        }
-
-        char buffer[BUFFER_SIZE];
-        ssize_t n;
-        struct sockaddr_in6 client_addr;
-        socklen_t addr_size = sizeof(client_addr);
-
-        while ((n = recvfrom(serv_sock, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&client_addr, &addr_size)) > 0) {
-            fwrite(buffer, sizeof(char), n, file);
-        }
-
-        fclose(file);
-        close(serv_sock);
-        printf("File received and saved as newIpv6Udp.txt\n");
+    int serv_sock = socket(AF_INET6, SOCK_DGRAM, 0);
+    if (serv_sock < 0) {
+        perror("socket");
+        exit(EXIT_FAILURE);
     }
+
+    struct sockaddr_in6 serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin6_family = AF_INET6;
+    serv_addr.sin6_addr = in6addr_any;
+    serv_addr.sin6_port = htons(port);
+    
+    if (bind(serv_sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("bind");
+        exit(EXIT_FAILURE);
+    }
+
+    // Set the timeout
+    struct timeval timeout;
+    timeout.tv_sec = 1;  // After 1 sec
+    timeout.tv_usec = 0; // and 0 microseconds
+
+    if (setsockopt(serv_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+
+    FILE *file = fopen("newIpv6Udp.txt", "wb");
+    if (file == NULL) {
+        perror("fopen");
+        exit(EXIT_FAILURE);
+    }
+    fflush(stdout);
+
+    char buffer[BUFFER_SIZE];
+    ssize_t n;
+    struct sockaddr_in6 client_addr;
+    socklen_t addr_size = sizeof(client_addr);
+    fflush(stdout);
+    while ((n = recvfrom(serv_sock, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&client_addr, &addr_size)) > 0) {
+        fwrite(buffer, sizeof(char), n, file);
+    }
+
+    // Check for timeout error
+    if (n < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            printf("Timeout occurred.\n");
+        } else {
+            perror("recvfrom");
+        }
+    }
+
+    fclose(file);
+    close(serv_sock);
+    printf("File received and saved as newIpv6Udp.txt\n");
+}
+
 
     void client_ipv6_udp(const char *ip, int port, const char *filename) {
         int client_sock = socket(AF_INET6, SOCK_DGRAM, 0);
@@ -506,6 +569,8 @@ void server_ipv6_tcp(int port, const char *filename) {
     // ################### IPv4 TCP ######################
 
     void server_ipv4_tcp(int port, const char *filename) {
+        printf("the port is: %d", port);
+        fflush(stdout);
         int serv_sock = socket(AF_INET, SOCK_STREAM, 0);
         if (serv_sock < 0) {
             perror("socket");
@@ -523,14 +588,14 @@ void server_ipv6_tcp(int port, const char *filename) {
             exit(EXIT_FAILURE);
         }
 
-        if (listen(serv_sock, 10) < 0) {
+        if (listen(serv_sock, 1) < 0) {
             perror("listen");
             exit(EXIT_FAILURE);
         }
 
         struct sockaddr_in client_addr;
         socklen_t addr_size = sizeof(client_addr);
-        int client_sock = accept(serv_sock, (struct sockaddr *)&client_addr, &addr_size);
+        int client_sock = accept(serv_sock, (struct sockaddr *)&client_addr, (socklen_t*) &addr_size);
         if (client_sock < 0) {
             perror("accept");
             exit(EXIT_FAILURE);
@@ -544,6 +609,7 @@ void server_ipv6_tcp(int port, const char *filename) {
 
         char buffer[BUFFER_SIZE];
         ssize_t n;
+
         while ((n = recv(client_sock, buffer, BUFFER_SIZE, 0)) > 0) {
             fwrite(buffer, 1, n, file);
         }
@@ -555,27 +621,35 @@ void server_ipv6_tcp(int port, const char *filename) {
     }
 
     void client_ipv4_tcp(const char *ip, int port, const char *filename) {
+        sleep(1);
         int client_sock = socket(AF_INET, SOCK_STREAM, 0);
         if (client_sock < 0) {
             perror("socket");
             exit(EXIT_FAILURE);
         }
-
+        printf("the port is: %d\n", port);
+        fflush(stdout);
         struct sockaddr_in serv_addr;
         memset(&serv_addr, 0, sizeof(serv_addr));
         serv_addr.sin_family = AF_INET;
         serv_addr.sin_port = htons(port);
 
-        if (inet_pton(AF_INET, ip, &serv_addr.sin_addr) <= 0) {
-            perror("inet_pton");
+        int pton_result = inet_pton(AF_INET, ip, &serv_addr.sin_addr);
+        if (pton_result <= 0) {
+            if(pton_result == 0) {
+                fprintf(stderr, "inet_pton: Invalid IP address\n");
+            } else {
+                perror("inet_pton");
+            }
             exit(EXIT_FAILURE);
         }
-            if (connect(client_sock, (const struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+
+        if (connect(client_sock, (const struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
             perror("connect");
             exit(EXIT_FAILURE);
         }
 
-        FILE *file = fopen("100MB.txt", "rb");
+        FILE *file = fopen("100MB.txt", "rb");  // you passed filename parameter, but didn't use it
         if (file == NULL) {
             perror("fopen");
             exit(EXIT_FAILURE);
@@ -584,13 +658,18 @@ void server_ipv6_tcp(int port, const char *filename) {
         char buffer[BUFFER_SIZE];
         ssize_t n;
         while ((n = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
-            send(client_sock, buffer, n, 0);
+            ssize_t send_result = send(client_sock, buffer, n, 0);
+            if(send_result == -1) {
+                perror("send");
+                exit(EXIT_FAILURE);
+            }
         }
 
         fclose(file);
         close(client_sock);
         printf("File sent successfully.\n");
     }
+
 
     // ################### IPv4 UDP ######################
 
@@ -612,6 +691,16 @@ void server_ipv6_tcp(int port, const char *filename) {
             exit(EXIT_FAILURE);
         }
 
+        // Set the timeout
+        struct timeval timeout;
+        timeout.tv_sec = 1;  // After 1 sec
+        timeout.tv_usec = 0; // and 0 microseconds
+
+        if (setsockopt(serv_sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+            perror("setsockopt");
+            exit(EXIT_FAILURE);
+        }
+
         FILE *file = fopen("newIpv4Udp.txt", "wb");
         if (file == NULL) {
             perror("fopen");
@@ -622,15 +711,28 @@ void server_ipv6_tcp(int port, const char *filename) {
         ssize_t n;
         struct sockaddr_in client_addr;
         socklen_t addr_size = sizeof(client_addr);
-
+        printf("ok1");
+        fflush(stdout);
         while ((n = recvfrom(serv_sock, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&client_addr, &addr_size)) > 0) {
             fwrite(buffer, sizeof(char), n, file);
         }
 
+        // Check for timeout error
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                printf("Timeout occurred.\n");
+            } else {
+                perror("recvfrom");
+            }
+        }
+
+        printf("ok2");
+        fflush(stdout);
         fclose(file);
         close(serv_sock);
         printf("File received and saved as newIpv4Udp.txt\n");
     }
+
 
     void client_ipv4_udp(const char *ip, int port, const char *filename) {
         int client_sock = socket(AF_INET, SOCK_DGRAM, 0);
