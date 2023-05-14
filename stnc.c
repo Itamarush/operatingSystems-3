@@ -10,6 +10,10 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/time.h>
+#include <sys/un.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
+
 
 #define BUFFER_SIZE 1024
 #define MAX_CONN 1
@@ -33,6 +37,22 @@ void client_ipv4_tcp(const char* ip, int port, const char* filename);
 void server_ipv4_udp(int port, const char* filename);
 
 void client_ipv4_udp(const char* ip, int port, const char* filename);
+
+void server_uds_stream(const char* path, const char* filename);
+
+void server_uds_dgram(const char* path, const char* filename);
+
+void client_uds_dgram(const char* path, const char* filename);
+
+void client_uds_stream(const char* path, const char* filename);
+
+void server_pipe_filename(const char* filename);
+
+void client_pipe_filename(const char* filename);
+
+void client_mmap_filename(const char* filename);
+
+void server_mmap_filename(const char* filename);
 
 void handle_connection(int sockfd);
 
@@ -74,159 +94,200 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 
-void server_mode(int port, int progress, int quiet) {
-    char buffer[BUFFER_SIZE];
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        perror("socket");
-        exit(EXIT_FAILURE);
+    // Function to calculate checksum
+    unsigned short calculateChecksum(const char *data, int length) {
+        unsigned int sum = 0;
+        unsigned short *ptr = (unsigned short *)data;
+
+        // Calculate the sum of 16-bit chunks
+        while (length > 1) {
+            sum += *ptr++;
+            length -= 2;
+        }
+
+        // If length is odd, add the last byte
+        if (length > 0) {
+            sum += *((unsigned char *)ptr);
+        }
+
+        // Add the carry bits to the sum
+        while (sum >> 16) {
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        }
+
+        // Take the one's complement of the sum
+        unsigned short checksum = ~sum;
+
+        return checksum;
     }
 
-    struct sockaddr_in servaddr;
-    memset(&servaddr, 0, sizeof(servaddr));
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
-    servaddr.sin_port = htons(port);
+    void server_mode(int port, int progress, int quiet) {
+        char buffer[BUFFER_SIZE];
+        int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        if (sockfd < 0) {
+            perror("socket");
+            exit(EXIT_FAILURE);
+        }
 
-    if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
-        perror("bind");
-        exit(EXIT_FAILURE);
+        struct sockaddr_in servaddr;
+        memset(&servaddr, 0, sizeof(servaddr));
+        servaddr.sin_family = AF_INET;
+        servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+        servaddr.sin_port = htons(port);
+
+        if (bind(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+            perror("bind");
+            exit(EXIT_FAILURE);
+        }
+
+        if (listen(sockfd, MAX_CONN) < 0) {
+            perror("listen");
+            exit(EXIT_FAILURE);
+        }
+
+        printf("Server listening on port %d...\n", port);
+
+        struct sockaddr_in cliaddr;
+        socklen_t clilen = sizeof(cliaddr);
+        int connfd = accept(sockfd, (struct sockaddr *)&cliaddr, &clilen);
+        if (connfd < 0) {
+            perror("accept");
+            exit(EXIT_FAILURE);
+        }
+
+        printf("Connected to client: %s:%d\n", inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
+
+        if (progress) {
+            if (quiet) {
+                ssize_t n = recv(connfd, buffer, BUFFER_SIZE, 0);
+                if (n > 0) {
+                    buffer[n] = '\0';
+                    printf("\nReceived: %s\n", buffer);
+
+                    struct timeval start, end; // Variables for time measurement
+                    gettimeofday(&start, NULL); // Start time measurement
+
+                    // Calculate and print the checksum
+                    unsigned short checksum = calculateChecksum(buffer, n);
+                    printf("Checksum: %u\n", checksum);
+
+                    if (strcmp("ipv6 tcp", buffer) == 0) {
+                        server_ipv6_tcp(port + 1, "100MB");
+                    }
+                    else if (strcmp("ipv6 udp", buffer) == 0) {
+                        server_ipv6_udp(port + 1, "100MB");
+                    }
+                    else if (strcmp("ipv4 tcp", buffer) == 0) {
+                        server_ipv4_tcp(port + 1, "100MB");
+                    }
+                    else if (strcmp("ipv4 udp", buffer) == 0) {
+                        server_ipv4_udp(port + 1, "100MB");
+                    }
+
+                    else if (strcmp("uds dgram", buffer) == 0) {
+                        server_uds_dgram("socket.sock", "100MB");
+                    }
+                    
+                    else if (strcmp("uds stream", buffer) == 0) {
+                        server_uds_stream("socket.sock", "100MB");
+                    }
+                    
+                    else if (strcmp("pipe filename", buffer) == 0) {
+                        server_pipe_filename("100MB");
+                    }
+                    
+                    else if (strcmp("mmap filename", buffer) == 0) {
+                        server_mmap_filename("100MB");
+                    }
+
+                    gettimeofday(&end, NULL); // End time measurement
+                    double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000000.0;
+                    printf("Time taken: %.2f seconds.\n", elapsed);
+                }
+            }
+        else
+        {
+            handle_connection(connfd);
+        }
+
+        close(connfd);
+        close(sockfd);
+        }
     }
+    void client_mode(const char *ip, int port, char *type, char *param) {
+        int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        if (sockfd < 0) {
+            perror("socket");
+            exit(EXIT_FAILURE);
+        }
 
-    if (listen(sockfd, MAX_CONN) < 0) {
-        perror("listen");
-        exit(EXIT_FAILURE);
-    }
+        struct sockaddr_in servaddr;
+        memset(&servaddr, 0, sizeof(servaddr));
+        servaddr.sin_family = AF_INET;
+        servaddr.sin_port = htons(port);
 
-    printf("Server listening on port %d...\n", port);
+        if (inet_pton(AF_INET, ip, &servaddr.sin_addr) <= 0) {
+            perror("inet_pton");
+            exit(EXIT_FAILURE);
+        }
 
-    struct sockaddr_in cliaddr;
-    socklen_t clilen = sizeof(cliaddr);
-    int connfd = accept(sockfd, (struct sockaddr *)&cliaddr, &clilen);
-    if (connfd < 0) {
-        perror("accept");
-        exit(EXIT_FAILURE);
-    }
+        if (connect(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
+            perror("connect");
+            exit(EXIT_FAILURE);
+        }
 
-    printf("Connected to client: %s:%d\n", inet_ntoa(cliaddr.sin_addr), ntohs(cliaddr.sin_port));
+        printf("Connected to server: %s:%d\n", ip, port);
+        printf("Sending file 100MB.txt of size 104857600 bytes\n");
 
-    if (progress) {
-        if (quiet) {
-            ssize_t n = recv(connfd, buffer, BUFFER_SIZE, 0);
-            if (n > 0) {
-                buffer[n] = '\0';
-                printf("\nReceived: %s\n", buffer);
-
-                struct timeval start, end; // Variables for time measurement
-                gettimeofday(&start, NULL); // Start time measurement
-
-                // Calculate and print the checksum
-                unsigned short checksum = calculateChecksum(buffer, n);
-                printf("Checksum: %u\n", checksum);
-
-                if (strcmp("ipv6 tcp", buffer) == 0) {
-                    server_ipv6_tcp(port + 1, "100MB");
-                } else if (strcmp("ipv6 udp", buffer) == 0) {
-                    server_ipv6_udp(port + 1, "100MB");
-                } else if (strcmp("ipv4 tcp", buffer) == 0) {
-                    server_ipv4_tcp(port + 1, "100MB");
-                } else if (strcmp("ipv4 udp", buffer) == 0) {
-                    server_ipv4_udp(port + 1, "100MB");
+        if (type) {
+            if (strcmp(type, "ipv4") == 0) {
+                if (strcmp(param, "tcp") == 0) {
+                    sleep(1);
+                    int a = send(sockfd, "ipv4 tcp", 9, 0);
+                    printf("\nSending: ipv4 tcp\n");
+                    client_ipv4_tcp("127.0.0.1", port + 1, "100MB");
+                } else if (strcmp(param, "udp") == 0) {
+                    send(sockfd, "ipv4 udp", 8, 0);
+                    printf("\nSending: ipv4 udp\n");
+                    client_ipv4_udp("127.0.0.1", port + 1, "100MB");
                 }
 
-                gettimeofday(&end, NULL); // End time measurement
-                double elapsed = (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000000.0;
-                printf("Time taken: %.2f seconds.\n", elapsed);
-            }
-        }
-    } else {
-        handle_connection(connfd);
-    }
+            } else if (strcmp(type, "ipv6") == 0) {
+                if (strcmp(param, "tcp") == 0) {
+                    sleep(1);
+                    int a = send(sockfd, "ipv6 tcp", 9, 0);
+                    send(sockfd, "ipv6 tcp", 8, 0);
+                    printf("\nSending: ipv6 tcp\n");
+                    client_ipv6_tcp("::1", port + 1, "100MB");
 
-    close(connfd);
-    close(sockfd);
-}
+                } else if (strcmp(param, "udp") == 0)
+                    sleep(1);
+                    int a = send(sockfd, "ipv6 udp", 9, 0);
+                    send(sockfd, "ipv6 udp", 8, 0);
+                    printf("\nSending: ipv6 udp\n");
+                    client_ipv6_udp("::1", port + 1, "100MB");
 
-void client_mode(const char *ip, int port, char *type, char *param) {
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) {
-        perror("socket");
-        exit(EXIT_FAILURE);
-    }
-
-    struct sockaddr_in servaddr;
-    memset(&servaddr, 0, sizeof(servaddr));
-    servaddr.sin_family = AF_INET;
-    servaddr.sin_port = htons(port);
-
-    if (inet_pton(AF_INET, ip, &servaddr.sin_addr) <= 0) {
-        perror("inet_pton");
-        exit(EXIT_FAILURE);
-    }
-
-    if (connect(sockfd, (const struct sockaddr *)&servaddr, sizeof(servaddr)) < 0) {
-        perror("connect");
-        exit(EXIT_FAILURE);
-    }
-
-    printf("Connected to server: %s:%d\n", ip, port);
-    printf("Sending file 100MB.txt of size 104857600 bytes\n");
-
-    if (type) {
-        if (strcmp(type, "ipv4") == 0) {
-            if (strcmp(param, "tcp") == 0) {
-                sleep(1);
-                int a = send(sockfd, "ipv4 tcp", 9, 0);
-                printf("\nSending: ipv4 tcp\n");
-                client_ipv4_tcp("127.0.0.1", port + 1, "100MB");
-            } else if (strcmp(param, "udp") == 0) {
-                send(sockfd, "ipv4 udp", 8, 0);
-                printf("\nSending: ipv4 udp\n");
-                client_ipv4_udp("127.0.0.1", port + 1, "100MB");
-            }
-
-        } else if (strcmp(type, "ipv6") == 0) {
-            if (strcmp(param, "tcp") == 0) {
-                sleep(1);
-                int a = send(sockfd, "ipv6 tcp", 9, 0);
-                send(sockfd, "ipv6 tcp", 8, 0);
-                printf("\nSending: ipv6 tcp\n");
-                client_ipv6_tcp("::1", port + 1, "100MB");
-
-            } else if (strcmp(param, "udp") == 0)
-                sleep(1);
-                int a = send(sockfd, "ipv6 udp", 9, 0);
-                send(sockfd, "ipv6 udp", 8, 0);
-                printf("\nSending: ipv6 udp\n");
-                client_ipv6_udp("::1", port + 1, "100MB");
-
-            }
-        } else if (strcmp(type, "pipe") == 0) {
-            if (strcmp(param, "filename") == 0) {
-                sleep(1);
-                int a = send(sockfd, "pipe filename", 9, 0);
-                send(sockfd, "pipe filename", 8, 0);
-                printf("\nSending: pipe filename\n");
-            }
-        } else if (strcmp(type, "mmap") == 0) {
-            if (strcmp(param, "filename") == 0) {
-                send(sockfd, "mmap filename", 8, 0);
-                printf("\nSending: mmap filename\n");
-            }
-        } else if (strcmp(type, "uds") == 0) {
+                }
+            } else if (strcmp(type, "uds") == 0) {
             if (strcmp(param, "dgram") == 0) {
-                send(sockfd, "uds dgram", 8, 0);
-                printf("\nSending: uds dgram\n");
+                client_uds_dgram("socket.sock", "100MB.txt");
             } else if (strcmp(param, "stream") == 0) {
-                send(sockfd, "uds stream", 8, 0);
-                printf("\nSending: uds stream\n");
+                client_uds_stream("socket.sock", "100MB.txt");
             }
+            } else if (strcmp(type, "pipe") == 0) {
+            if (strcmp(param, "filename") == 0) {
+                client_pipe_filename("100MB.txt");
+            }
+            } else if (strcmp(type, "mmap") == 0) {
+            if (strcmp(param, "filename") == 0) {
+                client_mmap_filename("100MB.txt");
+            }
+            }
+        else {
+            handle_connection(sockfd);
         }
-    else {
-        handle_connection(sockfd);
+        close(sockfd);
     }
-    close(sockfd);
-}
 
 void handle_connection(int sockfd) {
     char buffer[BUFFER_SIZE];
@@ -400,7 +461,7 @@ void server_ipv6_tcp(int port, const char *filename) {
         socklen_t addr_size = sizeof(client_addr);
 
         while ((n = recvfrom(serv_sock, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&client_addr, &addr_size)) > 0) {
-            fwrite(buffer            , 1, n, file);
+            fwrite(buffer, sizeof(char), n, file);
         }
 
         fclose(file);
@@ -563,7 +624,7 @@ void server_ipv6_tcp(int port, const char *filename) {
         socklen_t addr_size = sizeof(client_addr);
 
         while ((n = recvfrom(serv_sock, buffer, BUFFER_SIZE, 0, (struct sockaddr *)&client_addr, &addr_size)) > 0) {
-            fwrite(buffer, 1, n, file);
+            fwrite(buffer, sizeof(char), n, file);
         }
 
         fclose(file);
@@ -605,30 +666,325 @@ void server_ipv6_tcp(int port, const char *filename) {
         printf("File sent successfully.\n");
     }
 
-    // Function to calculate checksum
-    unsigned short calculateChecksum(const char *data, int length) {
-    unsigned int sum = 0;
-    unsigned short *ptr = (unsigned short *)data;
+    void server_uds_stream(const char* path, const char* filename) {
+        int serv_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (serv_sock < 0) {
+            perror("socket");
+            exit(EXIT_FAILURE);
+        }
 
-    // Calculate the sum of 16-bit chunks
-    while (length > 1) {
-        sum += *ptr++;
-        length -= 2;
+        struct sockaddr_un serv_addr;
+        memset(&serv_addr, 0, sizeof(serv_addr));
+        serv_addr.sun_family = AF_UNIX;
+        strncpy(serv_addr.sun_path, path, sizeof(serv_addr.sun_path) - 1);
+
+        unlink(path);  // Remove any existing socket file
+
+        if (bind(serv_sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+            perror("bind");
+            exit(EXIT_FAILURE);
+        }
+
+        if (listen(serv_sock, 10) < 0) {
+            perror("listen");
+            exit(EXIT_FAILURE);
+        }
+
+        printf("Server listening on Unix Domain Socket: %s\n", path);
+
+        int client_sock = accept(serv_sock, NULL, NULL);
+        if (client_sock < 0) {
+            perror("accept");
+            exit(EXIT_FAILURE);
+        }
+
+        FILE* file = fopen(filename, "wb");
+        if (file == NULL) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
+
+        char buffer[BUFFER_SIZE];
+        ssize_t n;
+        while ((n = recv(client_sock, buffer, BUFFER_SIZE, 0)) > 0) {
+            fwrite(buffer, sizeof(char), n, file);
+        }
+
+        fclose(file);
+        close(client_sock);
+        close(serv_sock);
+        unlink(path);  // Remove the socket file after use
     }
 
-    // If length is odd, add the last byte
-    if (length > 0) {
-        sum += *((unsigned char *)ptr);
+    void client_uds_stream(const char* path, const char* filename) {
+        int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+        if (sockfd < 0) {
+            perror("socket");
+            exit(EXIT_FAILURE);
+        }
+
+        struct sockaddr_un serv_addr;
+        memset(&serv_addr, 0, sizeof(serv_addr));
+        serv_addr.sun_family = AF_UNIX;
+        strncpy(serv_addr.sun_path, path, sizeof(serv_addr.sun_path) - 1);
+
+        if (connect(sockfd, (const struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+            perror("connect");
+            exit(EXIT_FAILURE);
+        }
+
+        FILE* file = fopen(filename, "rb");
+        if (file == NULL) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
+
+        char buffer[BUFFER_SIZE];
+        ssize_t n;
+        while ((n = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
+            send(sockfd, buffer, n, 0);
+        }
+
+        fclose(file);
+        close(sockfd);
+    }
+    
+    void server_uds_dgram(const char* path, const char* filename) {
+        int serv_sock = socket(AF_UNIX, SOCK_DGRAM, 0);
+        if (serv_sock < 0) {
+            perror("socket");
+            exit(EXIT_FAILURE);
+        }
+
+        struct sockaddr_un serv_addr;
+        memset(&serv_addr, 0, sizeof(serv_addr));
+        serv_addr.sun_family = AF_UNIX;
+        strncpy(serv_addr.sun_path, path, sizeof(serv_addr.sun_path) - 1);
+
+        unlink(path);  // Remove any existing socket file
+        if (bind(serv_sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+        perror("bind");
+        exit(EXIT_FAILURE);
+        }
+
+        printf("Server listening on Unix Domain Socket: %s\n", path);
+
+        FILE* file = fopen(filename, "wb");
+        if (file == NULL) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
+
+        char buffer[BUFFER_SIZE];
+        ssize_t n;
+        while ((n = recvfrom(serv_sock, buffer, BUFFER_SIZE, 0, NULL, NULL)) > 0) {
+            fwrite(buffer, sizeof(char), n, file);
+        }
+
+        fclose(file);
+        close(serv_sock);
+        unlink(path);  // Remove the socket file after use
     }
 
-    // Add the carry bits to the sum
-    while (sum >> 16) {
-        sum = (sum & 0xFFFF) + (sum >> 16);
+    void client_uds_dgram(const char* path, const char* filename) {
+        int sockfd = socket(AF_UNIX, SOCK_DGRAM, 0);
+        if (sockfd < 0) {
+            perror("socket");
+            exit(EXIT_FAILURE);
+        }
+
+        struct sockaddr_un serv_addr;
+        memset(&serv_addr, 0, sizeof(serv_addr));
+        serv_addr.sun_family = AF_UNIX;
+        strncpy(serv_addr.sun_path, path, sizeof(serv_addr.sun_path) - 1);
+
+        FILE* file = fopen(filename, "rb");
+        if (file == NULL) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
+
+        char buffer[BUFFER_SIZE];
+        ssize_t n;
+        while ((n = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
+            sendto(sockfd, buffer, n, 0, (const struct sockaddr*)&serv_addr, sizeof(serv_addr));
+        }
+
+        fclose(file);
+        close(sockfd);
     }
 
-    // Take the one's complement of the sum
-    unsigned short checksum = ~sum;
+    void server_pipe_filename(const char* filename) {
+        FILE* file = fopen(filename, "wb");
+        if (file == NULL) {
+            perror("fopen");
+            exit(EXIT_FAILURE);
+        }
 
-    return checksum;
+        int pipefd[2];
+        if (pipe(pipefd) == -1) {
+            perror("pipe");
+            exit(EXIT_FAILURE);
+        }
+
+        pid_t pid = fork();
+        if (pid == -1) {
+            perror("fork");
+            exit(EXIT_FAILURE);
+        } else if (pid == 0) {
+            // Child process
+            close(pipefd[1]);  // Close the write end of the pipe
+
+            ssize_t n;
+            char buffer[BUFFER_SIZE];
+            while ((n = read(pipefd[0], buffer, BUFFER_SIZE)) > 0) {
+                fwrite(buffer, 1, n, file);
+            }
+
+            fclose(file);
+            close(pipefd[0]);  // Close the read end of the pipe
+            exit(EXIT_SUCCESS);
+        } else {
+            // Parent process
+            close(pipefd[0]);  // Close the read end of the pipe
+
+            FILE* source = fopen(filename, "rb");
+            if (source == NULL) {
+                perror("fopen");
+                exit(EXIT_FAILURE);
+            }
+
+            ssize_t n;
+            char buffer[BUFFER_SIZE];
+            while ((n = fread(buffer, 1, BUFFER_SIZE, source)) > 0) {
+                write(pipefd[1], buffer, n);
+            }
+
+            fclose(source);
+            close(pipefd[1]);  // Close the write end of the pipe
+            wait(NULL);  // Wait for the child process to exit
+        }
+    }
+
+    void client_pipe_filename(const char* filename) {
+        int pipefd[2];
+        if (pipe(pipefd) == -1) {
+        perror("pipe");
+        exit(EXIT_FAILURE);
+    }
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        perror("fork");
+        exit(EXIT_FAILURE);
+    } else if (pid == 0) {
+        // Child process
+        close(pipefd[0]);  // Close the read end of the pipe
+
+        FILE* file = fopen(filename, "rb");
+        if (file == NULL) {
+        perror("fopen");
+        exit(EXIT_FAILURE);
+        }
+
+        char buffer[BUFFER_SIZE];
+        ssize_t n;
+        while ((n = fread(buffer, 1, BUFFER_SIZE, file)) > 0) {
+        write(pipefd[1], buffer, n);
+        }
+
+        fclose(file);
+        close(pipefd[1]);  // Close the write end of the pipe
+        exit(EXIT_SUCCESS);
+    } 
+    else {
+        // Parent process
+        close(pipefd[1]);  // Close the write end of the pipe
+
+        FILE* file = fopen(filename, "wb");
+        if (file == NULL) {
+        perror("fopen");
+        exit(EXIT_FAILURE);
+        }
+
+        ssize_t n;
+        char buffer[BUFFER_SIZE];
+        while ((n = read(pipefd[0], buffer, BUFFER_SIZE)) > 0) {
+        fwrite(buffer, 1, n, file);
+        }
+
+        fclose(file);
+        close(pipefd[0]);  // Close the read end of the pipe
+        wait(NULL);  // Wait for the child process to exit
+    }
+
+    }
+
+    void server_mmap_filename(const char* filename) {
+    FILE* file = fopen(filename, "wb");
+    if (file == NULL) {
+        perror("fopen");
+        exit(EXIT_FAILURE);
+    }
+
+    size_t size = BUFFER_SIZE * sizeof(char);
+    char* buffer = (char*)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_FILE, -1, 0);
+    if (buffer == (char*)MAP_FAILED) {
+        perror("mmap");
+        exit(EXIT_FAILURE);
+    }
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        perror("fork");
+        exit(EXIT_FAILURE);
+    } else if (pid == 0) {
+        // Child process
+        FILE* source = fopen(filename, "rb");
+        if (source == NULL) {
+        perror("fopen");
+        exit(EXIT_FAILURE);
+        }
+
+        ssize_t n;
+        while ((n = fread(buffer, sizeof(char), size, source)) > 0) {
+        fwrite(buffer, sizeof(char), n, file);
+        }
+
+        fclose(source);
+        exit(EXIT_SUCCESS);
+    } else {
+        // Parent process
+        ssize_t n;
+        while ((n = fread(buffer, sizeof(char), size, stdin)) > 0) {
+        fwrite(buffer, sizeof(char), n, file);
+        }
+
+        fclose(file);
+        wait(NULL);  // Wait for the child process to exit
+    }
+
+    munmap(buffer, size);
+    }
+
+    void client_mmap_filename(const char* filename) {
+    FILE* file = fopen(filename, "rb");
+    if (file == NULL) {
+        perror("fopen");
+        exit(EXIT_FAILURE);
+    }
+
+    size_t size = BUFFER_SIZE * sizeof(char);
+    char* buffer = (char*)mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS | MAP_FILE, -1, 0);
+    if (buffer == (char*)MAP_FAILED) {
+        perror("mmap");
+        exit(EXIT_FAILURE);
+        ssize_t n;
+    while ((n = fread(buffer, sizeof(char), size, file)) > 0) {
+        fwrite(buffer, sizeof(char), n, stdout);
+    }
+
+    fclose(file);
+    munmap(buffer, size);
+    }
 }
-
